@@ -1,0 +1,8 @@
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x64\Debug\PluginHandleProcess.csproj.CoreCompileInputs.cache
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x64\Debug\PluginHandleProcess.csprojAssemblyReference.cache
+C:\Users\innon\AppData\Roaming\Rainmeter\Plugins\Empty.dll
+C:\Users\innon\AppData\Roaming\Rainmeter\Plugins\Empty.pdb
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\x64\Debug\PluginHandleProcess.dll
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\x64\Debug\PluginHandleProcess.pdb
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x64\Debug\PluginHandleProcess.dll
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x64\Debug\PluginHandleProcess.pdb
