@@ -5,43 +5,50 @@ using Rainmeter;
 
 using System.Diagnostics;
 using System.Management;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Threading;
 using System.IO;
 
 
-
-// Overview: This is a blank canvas on which to build your plugin.
-
-// Note: GetString, ExecuteBang and an unnamed function for use as a section variable
-// have been commented out. If you need GetString, ExecuteBang, and/or section variables 
-// and you have read what they are used for from the SDK docs, uncomment the function(s)
-// and/or add a function name to use for the section variable function(s). 
-// Otherwise leave them commented out (or get rid of them)!
+//This is the source code for a custom dll being used by the rainmeter skin Distiller Block
+//It tracks current running application in the operation system and convert icons into png file for display purpose
+//Author: Innonion
 
 namespace PluginHandleProcess
 {
-    
+
     class Measure
     {
+
+
         static public implicit operator Measure(IntPtr data)
         {
-            TraySysProcesses = new Process[MaxSize];
             return (Measure)GCHandle.FromIntPtr(data).Target;
         }
         public IntPtr buffer = IntPtr.Zero;
-        
 
+        //Max Size of the program
         public const int MaxSize = 15;
-        public static Process[] TraySysProcesses;
 
-        
+
+        //Previous string list of running applications
+        public string[] PrevSysProcesses = new string[MaxSize];
+
+
+        //Actual total number of previous running applications
+        public int PrevSize = 0;
+
+        //Current list of running applications
+        public Process[] TraySysProcesses = new Process[MaxSize];
+
         //Determines if a change in application processes are made
         public static int IsUpdate = 0;
 
         //iniPath
         public static string iniPath = string.Concat(System.Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments).ToString(), "\\Rainmeter\\Skins\\Distiller_Block\\Display\\Display.ini");
 
-        
+
 
         internal string ExtractName(string service_name)
         {
@@ -66,15 +73,15 @@ namespace PluginHandleProcess
             //name of the process
             string name = ExtractName(p.ToString());
 
-            //Special Case: System Settings
-            if (name == "SystemSettings")
-                return true;
 
-            //ignore specific running process:
+            //Exclude specific running process:
             //ApplicationFrameHost: defines Frameworks of Microsoft Apps, doesn't really have a visible windows of its own but still considered as graphical interace
             //Rainmeter:            No need to self-check itself
-            //MicrosoftEdgeCP:      Running along side with Microsoft Edge, redundancy
-            if (name == "ApplicationFrameHost" || name == "Rainmeter" || name == "MicrosoftEdgeCP")
+            //MicrosoftEdgeCP:      Running along side with Microsoft Edge CP, redundancy, also being mis-identified as running process
+            //SystemSettings:       Being mis-identified as running application even when it is not opened ( probably running in the background )
+            //explorer:             Being mis-identified as running application even when it is not opened ( probably running in the background )
+            if (name == "ApplicationFrameHost" || name == "Rainmeter" || name == "MicrosoftEdge" || name == "MicrosoftEdgeCP" ||
+                name == "SystemSettings" || name == "explorer")
                 return false;
 
 
@@ -95,19 +102,6 @@ namespace PluginHandleProcess
             {
                 return false;
             }
-          
-            /*
-            //check redundancy, e.g.  multiple MicrosoftEdgeCP 
-            foreach (Process element in list)
-            {
-                if (element == null)
-                    break;
-
-                string listname = element.ToString();
-                if (listname.Contains(name))
-                    return false;
-            }
-            */
 
             return true;
         }
@@ -129,10 +123,28 @@ namespace PluginHandleProcess
         [DllExport]
         public static void Initialize(ref IntPtr data, IntPtr rm)
         {
-            data = GCHandle.ToIntPtr(GCHandle.Alloc(new Measure()));
-            Rainmeter.API api = (Rainmeter.API)rm;
-            
+
+            Measure measure = new Measure();
+
+            //Initialize PrevSysProcess List first, based on reading PValues inside ini files            
+            for (int Count = 0; Count < Measure.MaxSize; Count++)
+            {
+                char[] PrevPValueCharArray = new char[256];
+                GetPrivateProfileString("Variables", string.Concat("PValue", Count.ToString()), "Default.png", PrevPValueCharArray, 256, Measure.iniPath);
+                string PrevPValue = new string(PrevPValueCharArray);
+                PrevPValue = System.Text.RegularExpressions.Regex.Replace(PrevPValue, @"\0", "");
+
+                if (PrevPValue != "Default.png")
+                    measure.PrevSize++;
+
+                measure.PrevSysProcesses[Count] = PrevPValue;
+            }
+
+
+
+            data = GCHandle.ToIntPtr(GCHandle.Alloc(measure));
         }
+
 
         [DllExport]
         public static void Finalize(IntPtr data)
@@ -145,98 +157,88 @@ namespace PluginHandleProcess
             GCHandle.FromIntPtr(data).Free();
         }
 
+
         [DllExport]
         public static void Reload(IntPtr data, IntPtr rm, ref double maxValue)
         {
             Measure measure = (Measure)data;
             Rainmeter.API api = (Rainmeter.API)rm;
 
-
-            //Collect an array of PValues in ini files before update
-            //Also Calculate no of total application running before the cycle
-            string[] PrevPValues = new string[Measure.MaxSize];
-            int totalPrevProcesses = 0;
-
-            for ( int Count = 0; Count < Measure.MaxSize; Count++ )
-            {
-                char[] PrevPValueCharArray = new char[64];
-                GetPrivateProfileString("Variables", string.Concat("PValue", Count), "Default.png", PrevPValueCharArray, 64, Measure.iniPath);
-                string PrevPValue = new String(PrevPValueCharArray);
-                PrevPValue = System.Text.RegularExpressions.Regex.Replace(PrevPValue, @"\0", "");
-
-                if (PrevPValue != "Default.png")
-                    totalPrevProcesses++;
-
-                PrevPValues[Count] = PrevPValue;
-            }
-            
-
-            //Collect All processes and filter all background and redundant processes, keeping all application process stored in TraySysProcesses
-            // size = total no of application processes ( after filtering )
-            int TotalSize = 0;
+            //Collect All processes
             Process[] AllSysProcesses = Process.GetProcesses();
 
-            
+
+            //Filter all background and redundant processes, keeping all application process stored in TraySysProcesses
+            // TotalSize       = total no of running application after filtering  
+            // ProcessesRecord = a temporary record of measure.TraySysProcesses in form of string name
+            int TotalSize = 0;
+            string[] ProcessesRecord = new string[Measure.MaxSize];
+
             foreach (Process service in AllSysProcesses)
             {
-                if (measure.IsRunningApplication(service, Measure.TraySysProcesses) && TotalSize < Measure.MaxSize)
+                if (measure.IsRunningApplication(service, measure.TraySysProcesses) && TotalSize < Measure.MaxSize)
                 {
-                    Measure.TraySysProcesses[TotalSize] = service;
+                    //Add the application to the processes list
+                    measure.TraySysProcesses[TotalSize] = service;
 
-                    // Compare Previous PValue with Current One
-                    if ( Measure.IsUpdate == 0 )
+                    string PValueName = string.Concat(measure.ExtractName(service.ToString()), ".png");
+                    ProcessesRecord[TotalSize] = PValueName;
+
+                    // Decide whether we need to update if there is a change ( only one change discovery is needed )
+                    if (Measure.IsUpdate == 0)
                     {
-                        //upcoming (Current) PValue
-                        string CurPValue = string.Concat(measure.ExtractName(Measure.TraySysProcesses[TotalSize].ToString()), ".png");
-
-                        // A New application is running
-                        if ( Array.IndexOf( PrevPValues ,CurPValue) == -1 ) 
+                        //Check if a new application is running
+                        if (Array.IndexOf(measure.PrevSysProcesses, PValueName) == -1)
                         {
                             Measure.IsUpdate = 1;
                         }
-                    }                    
+                    }
+
                     TotalSize = TotalSize + 1;
                 }
             }
 
             //Chekck if Application(s) being deleted
-            if (TotalSize < totalPrevProcesses)
-            {
+            if (TotalSize < measure.PrevSize)
                 Measure.IsUpdate = 1;
-            }
+
+
+            //Record current processes list, which can be used to compare next update later
+            Array.Copy(ProcessesRecord, measure.PrevSysProcesses, Measure.MaxSize);
+            measure.PrevSize = TotalSize;
+
+
 
             //Ignore Extract Icon process if no need to update
             if (Measure.IsUpdate == 0)
                 return;
 
             //Extract Icon from Process and saved it inside icon folder
-            for ( int pcount = 0; pcount < Measure.TraySysProcesses.Length; pcount++ )
+            for (int pcount = 0; pcount < measure.TraySysProcesses.Length; pcount++)
             {
-                Process service = Measure.TraySysProcesses[pcount];
+                Process service = measure.TraySysProcesses[pcount];
 
                 //ini file setting
                 string KeyName = string.Concat("PValue", pcount.ToString());
-                
+
 
                 // reaching empty items
-                if (service == null)
+                if (ProcessesRecord[pcount] == null)
                 {
                     WritePrivateProfileString("Variables", KeyName, "Default.png", Measure.iniPath);
                     continue;
                 }
 
-                string name = measure.ExtractName(service.ToString());
-                string value = string.Concat(name, ".png");
+                string PValueName = string.Concat(measure.ExtractName(service.ToString()), ".png");
                 //write to ini file
-                WritePrivateProfileString("Variables", KeyName, value, Measure.iniPath );
+                WritePrivateProfileString("Variables", KeyName, PValueName, Measure.iniPath);
 
                 //icon path
-                string path = string.Concat(System.Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments).ToString(), "\\Rainmeter\\Skins\\Distiller_Block\\@Resources\\Icon\\", name, ".png");
+                string path = string.Concat(System.Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments).ToString(), "\\Rainmeter\\Skins\\Distiller_Block\\@Resources\\Icon\\", PValueName);
 
                 //avoid re-saving the same icon picture
-                if (File.Exists(path))   
+                if (File.Exists(path))
                 {
-                    Console.WriteLine("{0} is already existed!", name);
                     continue;
                 }
 
@@ -252,12 +254,12 @@ namespace PluginHandleProcess
                     }
 
                 }
-                catch (Exception e) 
+                catch (Exception e)
                 { }
-                
+
             }
-            
-            
+
+
         }
 
         [DllExport]
@@ -266,9 +268,11 @@ namespace PluginHandleProcess
             Measure measure = (Measure)data;
             double result = (double)Measure.IsUpdate;
             Measure.IsUpdate = 0;
+
             return result;
         }
-        
+
     }
 }
+
 
