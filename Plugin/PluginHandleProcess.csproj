@@ -10,7 +10,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>PluginHandleProcess</RootNamespace>
     <AssemblyName>PluginHandleProcess</AssemblyName>
-    <TargetFrameworkVersion>v2.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <OldToolsVersion>3.5</OldToolsVersion>
     <UpgradeBackupLocation />
