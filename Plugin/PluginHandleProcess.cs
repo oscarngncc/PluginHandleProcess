@@ -20,12 +20,29 @@ namespace PluginHandleProcess
 {
     //Necessary Information and data about a process, including:
     //WindowName: Title of the main window
+    //ProcessNamePng: Process Name in the form of png ( e.g. firefox.png )
+    //ExeAddress: Location of the exe that executes the process ( used for getting icon )
     public struct ProcessData
     {
-        public ProcessData( string WN = "", string PN = "Default.png", string address = "") { WindowName = WN; ProcessNamePng = PN; ExeAddress = address; }
         public string WindowName;
         public string ProcessNamePng;
         public string ExeAddress;
+
+        //Constructor
+        public ProcessData( string WN = "", string PN = "Default.png", string address = "")
+        {
+          WindowName = WN;
+          ProcessNamePng = PN;
+          ExeAddress = address;
+        }
+
+        //Copy Constructor
+        public ProcessData(ProcessData copyobj)
+        {
+            WindowName = copyobj.WindowName;
+            ProcessNamePng = copyobj.ProcessNamePng;
+            ExeAddress = copyobj.ExeAddress;
+        }
 
         public override bool Equals(object obj)
         {
@@ -42,7 +59,10 @@ namespace PluginHandleProcess
 
     class Measure
     {
-
+        //Write values to .ini file
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool WritePrivateProfileString(string lpAppName, string lpKeyName, string lpString, string lpFileName);
 
         static public implicit operator Measure(IntPtr data)
         {
@@ -68,6 +88,12 @@ namespace PluginHandleProcess
         //Total number of UWP in PreviousUpdate Cycle
         public int PrevUWPCount = 0;
 
+        //Total number of Windows Setting file
+        public int WinSettingCount = 0;
+
+        //Total number of Windows Setting file in PreviousUpdate Cycle
+        public int PrevWinSettingCount = 0;
+
 
         //Previous string list of running applications ( in .png)
         public HashSet<string> PreSysProcesses = new HashSet<string>();
@@ -91,20 +117,17 @@ namespace PluginHandleProcess
 
 
         //IsRunningApplication determines whether the process is actually a real application, i.e. Application seen in alt-tab and under TaskManager Section
-        //it returns a total of 3 possibilities:
         //0: it is not a running application
         //1: it is a normal Windows running application
-        //2: it is a Universal Windows Application (require special treatment for its unique nature)
-        internal int IsRunningApplication(Process service, HashSet<string> PrevList = null , ProcessData[] Applist = null, int ApplistSize = 0)
+        internal int IsRunningApplication(Process service, ProcessData[] Applist = null, int ApplistSize = 0)
         {
             Process p = service;
             string name = p.ProcessName;
             string nameInPNG = string.Concat(name, ".png");
 
-            //Exclude specific running process:
+            //Exclude specific running process(es):
             //Rainmeter:            No need to self-check itself
-            //MicrosoftEdge:        Running along side with Microsoft Edge CP, redundancy, also being mis-identified as running process
-            if (name == "Rainmeter"  || name == "explorer" )
+            if (name == "Rainmeter"  )
             {
                 return 0;
             }
@@ -114,13 +137,11 @@ namespace PluginHandleProcess
                 return 0;
 
 
-            //Exclude Windows Default Apps and Special Manager Program(e.g. TaskManager) that cannot get the filename 
-            try
-            {
-                string test = p.MainModule.FileName;
-            }
+            try { string test = p.MainModule.FileName; }
             catch (Exception e)
             {
+                //If the program run into errors getting ExecutionFile Location, it is probably Native Windows Setting ( like Task Manager )
+                WinSettingCount++;
                 return 0;
             }
 
@@ -132,6 +153,17 @@ namespace PluginHandleProcess
                     return 0;
             }
             return 1;
+        }
+
+        //Set and Write Variable to ini File
+        internal void SetVariable( string KeyName, string Value, IntPtr rm)
+        {
+            WritePrivateProfileString("Variables", KeyName, Value, Measure.iniPath);
+
+            Rainmeter.API api = (Rainmeter.API)rm;
+            string Command = string.Concat("[!SetVariable ", KeyName, " \"", Value, "\"]");
+            API.Execute(api.GetSkin(), Command);
+            return;
         }
     }
 
@@ -208,7 +240,7 @@ namespace PluginHandleProcess
                 string PrevPValue = new string(PrevPValueCharArray);
                 PrevPValue = System.Text.RegularExpressions.Regex.Replace(PrevPValue, @"\0", "");
 
-                if (PrevPValue == "UWP.png")
+                if (PrevPValue == "WinAppAndUWP.png")
                     continue;
 
                 if (PrevPValue != "Default.png")
@@ -219,7 +251,7 @@ namespace PluginHandleProcess
 
             //Initialize PrevUWPCount
             char[] PrevUWPCount = new char[256];
-            GetPrivateProfileString("Variables", "UWPCount", "0", PrevUWPCount, 256, Measure.iniPath);
+            GetPrivateProfileString("Variables", "WinAppCount", "0", PrevUWPCount, 256, Measure.iniPath);
             string Value = new string(PrevUWPCount);
             Value = System.Text.RegularExpressions.Regex.Replace(Value, @"\0", "");
             measure.PrevUWPCount = Int32.Parse(Value);
@@ -255,6 +287,7 @@ namespace PluginHandleProcess
             //Filter all background and redundant processes, keeping all application process stored in TraySysProcesses
             // TotalSize       = total no of normal running application after filtering  
             // ProcessesRecord = a temporary record of measure.TraySysProcesses in form of string name
+            // UWPRecord       = a temporary record of measure.UWPRecord in form of UWP's Windows Title
             int TotalSize = 0;
             HashSet<string> ProcessesRecord = new HashSet<string>();
             HashSet<string> UWPRecord = new HashSet<string>();
@@ -289,7 +322,7 @@ namespace PluginHandleProcess
                     if (TotalSize >= Measure.MaxSize)
                         return true;
 
-                    int IsApp = measure.IsRunningApplication(Process, measure.PreSysProcesses, measure.TraySysProcesses, TotalSize);
+                    int IsApp = measure.IsRunningApplication(Process, measure.TraySysProcesses, TotalSize);
 
                     //Detect if it is Universal Window App 
                     if ( IsApp == 1 && (Process.ProcessName == "ApplicationFrameHost" || Process.ProcessName=="WWAHost")  )
@@ -308,7 +341,7 @@ namespace PluginHandleProcess
                         }
                     }
                     //Detect if it is windows application
-                    else if ( IsApp == 1 )
+                    else if ( IsApp == 1 && !String.IsNullOrEmpty(strTitle) )
                     {
                         string ProcessNameinPNG = string.Concat(Process.ProcessName, ".png");
 
@@ -337,9 +370,10 @@ namespace PluginHandleProcess
             if (TotalSize < measure.PrevSize )
                 Measure.IsUpdate = 1;
 
+
             if (measure.DelayCycle > 0 )
                 measure.DelayCycle--;
-            if (measure.PrevUWPCount != measure.UWPCount && measure.DelayCycle <= 0)
+            if (measure.PrevUWPCount + measure.PrevWinSettingCount != measure.UWPCount + measure.WinSettingCount   && measure.DelayCycle <= 0)
                 Measure.IsUpdate = 1;
 
 
@@ -350,6 +384,7 @@ namespace PluginHandleProcess
             {
                 measure.PrevUWPList = new HashSet<string>(UWPRecord);
                 measure.PrevUWPCount = measure.UWPCount;
+                measure.PrevWinSettingCount = measure.WinSettingCount;
             }
 
 
@@ -359,10 +394,10 @@ namespace PluginHandleProcess
 
 
             //Write UWPCount in ini file, and display it if there is/are UWP(s) running
-            WritePrivateProfileString("Variables", "UWPCount", measure.UWPCount.ToString(), Measure.iniPath);
-            int start = (measure.UWPCount > 0) ? 1 : 0;
+            measure.SetVariable("WinAppCount", (measure.UWPCount+measure.WinSettingCount).ToString(), rm);
+            int start = ( (measure.UWPCount + measure.WinSettingCount) > 0) ? 1 : 0;
             if (start == 1)
-                WritePrivateProfileString("Variables", "PValue0", "UWP.png", Measure.iniPath);
+                measure.SetVariable("PValue0", "WinAppAndUWP.png", rm);
 
          
             //Extract Icon from Process and saved it inside icon folder
@@ -372,14 +407,15 @@ namespace PluginHandleProcess
                 string KeyName = string.Concat("PValue", pcount.ToString());
 
                 // reaching empty items
-                if (ServiceData.ProcessNamePng == "Default.png")
+                if (ServiceData.ProcessNamePng == "Default.png" || String.IsNullOrEmpty(ServiceData.ProcessNamePng) )
                 {
-                    WritePrivateProfileString("Variables", KeyName, "Default.png", Measure.iniPath);
+                    //write to ini file, Set Variable
+                    measure.SetVariable(KeyName, "Default.png", rm);
                     continue;
                 }
 
-                //write to ini file
-                WritePrivateProfileString("Variables", KeyName, ServiceData.ProcessNamePng, Measure.iniPath);
+                //write to ini file, Set Variable
+                measure.SetVariable(KeyName, ServiceData.ProcessNamePng, rm);
 
                 //icon path
                 string path = string.Concat(System.Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments).ToString(), "\\Rainmeter\\Skins\\Distiller_Block\\@Resources\\Icon\\", ServiceData.ProcessNamePng);
@@ -389,6 +425,8 @@ namespace PluginHandleProcess
                 {
                     continue;
                 }
+                Measure.IsUpdate = 2;
+
 
                 // Saving the icon picture into @Resource\Icon Folder
                 try
@@ -405,7 +443,7 @@ namespace PluginHandleProcess
                 catch (Exception e)
                 {
                     //failure in getting the icon, use Default.png instead
-                    WritePrivateProfileString("Variables", KeyName, "Default.png", Measure.iniPath);
+                    measure.SetVariable(KeyName, "Default.png", rm);
                 }
 
             }
@@ -418,8 +456,14 @@ namespace PluginHandleProcess
         {
             Measure measure = (Measure)data;
             double result = (double)Measure.IsUpdate;
+            
+            //Flushing Data
             Measure.IsUpdate = 0;
             measure.UWPCount = 0;
+            measure.WinSettingCount = 0;
+            Array.Clear(measure.TraySysProcesses, 0, measure.TraySysProcesses.Length);
+            Array.Clear(measure.UWPList, 0, measure.UWPList.Length);
+
             return result;
         }
 
