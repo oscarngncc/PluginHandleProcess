@@ -1,3 +1,4 @@
 C:\Users\innon\source\repos\PluginHandleProcess\Plugin\x32\Release\PluginHandleProcess.dll
 C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x86\Release\PluginHandleProcess.csproj.CoreCompileInputs.cache
 C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x86\Release\PluginHandleProcess.dll
+C:\Users\innon\source\repos\PluginHandleProcess\Plugin\obj\x86\Release\PluginHandleProcess.csprojAssemblyReference.cache

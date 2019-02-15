@@ -425,8 +425,7 @@ namespace PluginHandleProcess
                 {
                     continue;
                 }
-                Measure.IsUpdate = 2;
-
+              
 
                 // Saving the icon picture into @Resource\Icon Folder
                 try
@@ -438,12 +437,13 @@ namespace PluginHandleProcess
                             btmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
                         }
                     }
-
+                    Measure.IsUpdate = 2;
                 }
                 catch (Exception e)
                 {
                     //failure in getting the icon, use Default.png instead
                     measure.SetVariable(KeyName, "Default.png", rm);
+                    Measure.IsUpdate = 1;
                 }
 
             }
